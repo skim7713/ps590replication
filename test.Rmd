@@ -1,0 +1,177 @@
+---
+title: "Test"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+
+```{r loaddata}
+pepdat <- read.csv("data.csv")
+colnames(pepdat)
+str(pepdat)
+
+pepdat_small <- subset(pepdat, muslim==1)
+```
+
+
+```{r meanbygroup}
+table(pepdat$kel_1_ans)
+pepdat$kel_1_ans_01 <- ifelse(pepdat$kel_1_ans=="Yes",1,ifelse(pepdat$kel_1_ans=="No",0,NA))
+
+aggregate(kel_1_ans_01~kel_1_qn, mean, data=pepdat_small,na.rm=T)
+
+pepdat$kel_2_ans_01 <- ifelse(pepdat$kel_2_ans=="Yes",1,ifelse(pepdat$kel_2_ans=="No",0,NA))
+
+aggregate(kel_2_ans_01~kel_2_qn, mean, data=pepdat_small,na.rm=T)
+
+pepdat$kel_3_ans_01 <- ifelse(pepdat$kel_3_ans=="Yes",1,ifelse(pepdat$kel_3_ans=="No",0,NA))
+
+aggregate(kel_3_ans_01~kel_3_qn, mean, data=pepdat_small,na.rm=T)
+
+table(pepdat$kel_1_qn)
+```
+
+**kel_1_...**: Group 1? 
+**kel_2_...**: Group 2?
+**kel_3_...**: Group 3?
+**prov**: province
+
+11 subgroups: female, urban, javanese, "younger 50%", "high school", unemployed, "no high income", "low income", santri, "Pro-Sharia", "Pro-Islam in Politics" 
+("female", "urban", "javanese", "younger", "unemployed", "santri" )
+```{r covariate_coding}
+pepdat_small$younger <- ifelse(pepdat_small$age < median(pepdat_small$age,na.rm=T),1,0)
+
+
+```
+
+
+```{r}
+panelAsubset <- subset(pepdat,kel_1_qn=="Islam/Good"|kel_1_qn=="Pancasila/Good")
+aggregate(kel_1_ans_01~female, mean, data=panelAsubset)
+
+# only female group & muslims 
+
+t.test(panelAsubset$kel_1_ans_01[panelAsubset$kel_1_qn=="Islam/Good"],
+       panelAsubset$kel_1_ans_01[panelAsubset$kel_1_qn=="Pancasila/Good"])
+
+# women supporting islam party v. women supporting pancasila party
+
+t.test(panelAsubset$kel_1_ans_01[panelAsubset$female==1],
+       panelAsubset$kel_1_ans_01[panelAsubset$female==0])
+
+t.test(panelAsubset$kel_1_ans_01[panelAsubset$urban==1],
+       panelAsubset$kel_1_ans_01[panelAsubset$urban==0])
+
+```
+
+
+machine learning to see subgroup effects
+```{r}
+#install.packages("BayesTree")
+#install.packages("bartMachine")
+library(BayesTree)
+pepdat_good <- pepdat_small[,c("kel_1_ans_01","kel_1_qn","female", "urban", "javanese", "younger", "unemployed", "santri" )]
+pepdat_good <- na.omit(pepdat_good)
+
+# Good pair 
+goodpair <- subset(pepdat_good, kel_1_qn=="Islam/Good" | kel_1_qn=="Pancasila/Good")
+goodpair$treatment <- ifelse(goodpair$kel_1_qn=="Islam/Good",1,0)
+
+y <- goodpair$kel_1_ans_01
+
+X <- goodpair[,c("treatment", "female", "urban", "javanese", "younger", "unemployed", "santri" )]
+
+bartfit = bart(X,y,ndpost = 1000,nskip = 500,usequants = T)
+
+dim(bartfit$yhat.train)
+
+mean(bartfit$yhat.train)
+
+plot(bartfit)
+hist(bartfit$yhat.train)
+ 
+set.seed(22)
+pdb1<-pdbart(X,y)
+
+length(pdb1$fd)
+
+
+
+par(mfrow=c(2,4))
+plot(pdb1)
+?pdbart()
+
+library(bartMachine)
+bart_machine = bartMachine(X, y)
+summary(bart_machine)
+
+hist(bart_machine$y_hat_train)
+
+pd_plot(bart_machine,"urban",
+    levs = c(0.05, seq(from = 0.1, to = 0.9, by = 0.1), 0.95),
+    lower_ci = 0.025, upper_ci = 0.975, prop_data = 1)
+
+pd_plot(bart_machine,"younger",
+    levs = c(0.05, seq(from = 0.1, to = 0.9, by = 0.1), 0.95),
+    lower_ci = 0.025, upper_ci = 0.975, prop_data = 1)
+
+```
+
+
+Unclear pair
+```{r}
+
+# Unclear pair 
+unclearpair <- subset(pepdat_good, kel_1_qn=="Islam/Unclear" | kel_1_qn=="Pancasila/Unclear")
+unclearpair$treatment <- ifelse(unclearpair$kel_1_qn=="Islam/Unclear",1,0)
+
+y <- unclearpair$kel_1_ans_01
+
+X <- unclearpair[,c("treatment", "female", "urban", "javanese", "younger", "unemployed", "santri" )]
+
+X$tr.female
+
+bartfit_unclear = bart(X,y,ndpost = 1000,nskip = 500,usequants = T)
+
+# dim(bartfit$yhat.train)
+# mean(bartfit$yhat.train)
+
+plot(bartfit_unclear)
+hist(bartfit_unclear$yhat.train)
+ 
+set.seed(22)
+pdb2<-pdbart(X,y)
+
+par(mfrow=c(2,4))
+plot(pdb2)
+
+# diff package
+bart_machine2 = bartMachine(X, y)
+summary(bart_machine)
+
+hist(bart_machine2$y_hat_train)
+
+par(mfrow=c(1,1))
+pd_plot(bart_machine2,"urban",
+    levs = c(0.05, seq(from = 0.1, to = 0.9, by = 0.1), 0.95),
+    lower_ci = 0.025, upper_ci = 0.975, prop_data = 1)
+
+pd_plot(bart_machine2,"younger",
+    levs = c(0.05, seq(from = 0.1, to = 0.9, by = 0.1), 0.95),
+    lower_ci = 0.025, upper_ci = 0.975, prop_data = 1)
+pd_plot(bart_machine2,"female",
+    levs = c(0.05, seq(from = 0.1, to = 0.9, by = 0.1), 0.95),
+    lower_ci = 0.025, upper_ci = 0.975, prop_data = 1)
+
+pd_plot(bart_machine2,"javanese",
+    levs = c(0.05, seq(from = 0.1, to = 0.9, by = 0.1), 0.95),
+    lower_ci = 0.025, upper_ci = 0.975, prop_data = 1)
+
+```
+
+
+```{r}
+install.packages
+```
+
